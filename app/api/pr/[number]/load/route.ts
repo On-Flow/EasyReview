@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { fetchPrMeta, fetchPrFiles, fetchPrComments } from "@/lib/github";
 import { readCache, writeCache } from "@/lib/cache";
+import { getReviewedHunkIds } from "@/lib/reviewed";
 import { groupPullRequest } from "@/lib/grouping";
 import type { PrLoadResult } from "@/lib/types";
 
@@ -16,10 +17,13 @@ export async function POST(
 
   try {
     const pr = await fetchPrMeta(prNumber);
+    // Reviewed marks live outside the cached blob (separate table, mutated by
+    // the /reviewed endpoint) so they're always read fresh, cache hit or not.
+    const reviewedHunkIds = getReviewedHunkIds(prNumber);
 
     const cached = await readCache(prNumber, pr.headSha);
     if (cached) {
-      return NextResponse.json({ ...cached, fromCache: true });
+      return NextResponse.json({ ...cached, reviewedHunkIds, fromCache: true });
     }
 
     const [files, comments] = await Promise.all([
@@ -49,7 +53,7 @@ export async function POST(
 
     await writeCache(prNumber, result);
 
-    return NextResponse.json({ ...result, fromCache: false });
+    return NextResponse.json({ ...result, reviewedHunkIds, fromCache: false });
   } catch (err) {
     console.error(`Failed to load PR #${prNumber}`, err);
     return NextResponse.json(

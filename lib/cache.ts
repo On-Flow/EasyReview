@@ -1,22 +1,17 @@
-import { promises as fs } from "fs";
-import path from "path";
+import { getDb } from "./db";
 import type { PrLoadResult } from "./types";
-
-const CACHE_DIR = path.join(process.cwd(), ".cache");
-
-function cachePath(prNumber: number): string {
-  return path.join(CACHE_DIR, `pr-${prNumber}.json`);
-}
 
 export async function readCache(
   prNumber: number,
   headSha: string
 ): Promise<PrLoadResult | null> {
+  const row = getDb()
+    .prepare("SELECT head_sha, data FROM prs WHERE pr_number = ?")
+    .get(prNumber) as { head_sha: string; data: string } | undefined;
+
+  if (!row || row.head_sha !== headSha) return null; // stale: new commits pushed
   try {
-    const raw = await fs.readFile(cachePath(prNumber), "utf-8");
-    const parsed = JSON.parse(raw) as PrLoadResult;
-    if (parsed.pr?.headSha !== headSha) return null; // stale: new commits pushed
-    return parsed;
+    return JSON.parse(row.data) as PrLoadResult;
   } catch {
     return null;
   }
@@ -26,8 +21,12 @@ export async function writeCache(
   prNumber: number,
   result: PrLoadResult
 ): Promise<void> {
-  await fs.mkdir(CACHE_DIR, { recursive: true });
-  await fs.writeFile(cachePath(prNumber), JSON.stringify(result, null, 2), "utf-8");
+  getDb()
+    .prepare(
+      `INSERT INTO prs (pr_number, head_sha, data, fetched_at) VALUES (?, ?, ?, ?)
+       ON CONFLICT(pr_number) DO UPDATE SET head_sha = excluded.head_sha, data = excluded.data, fetched_at = excluded.fetched_at`
+    )
+    .run(prNumber, result.pr.headSha, JSON.stringify(result), result.fetchedAt);
 }
 
 export interface CachedPrSummary {
@@ -37,29 +36,16 @@ export interface CachedPrSummary {
 }
 
 export async function listCachedPrs(): Promise<CachedPrSummary[]> {
-  try {
-    const entries = await fs.readdir(CACHE_DIR);
-    const summaries = await Promise.all(
-      entries
-        .filter((e) => e.startsWith("pr-") && e.endsWith(".json"))
-        .map(async (e) => {
-          try {
-            const raw = await fs.readFile(path.join(CACHE_DIR, e), "utf-8");
-            const parsed = JSON.parse(raw) as PrLoadResult;
-            return {
-              number: parsed.pr.number,
-              title: parsed.pr.title,
-              fetchedAt: parsed.fetchedAt,
-            };
-          } catch {
-            return null;
-          }
-        })
-    );
-    return summaries
-      .filter((s): s is CachedPrSummary => s !== null)
-      .sort((a, b) => b.number - a.number);
-  } catch {
-    return [];
-  }
+  const rows = getDb()
+    .prepare("SELECT pr_number, data, fetched_at FROM prs ORDER BY pr_number DESC")
+    .all() as { pr_number: number; data: string; fetched_at: string }[];
+
+  return rows.flatMap((row) => {
+    try {
+      const parsed = JSON.parse(row.data) as PrLoadResult;
+      return [{ number: row.pr_number, title: parsed.pr.title, fetchedAt: row.fetched_at }];
+    } catch {
+      return [];
+    }
+  });
 }

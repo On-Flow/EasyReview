@@ -85,13 +85,16 @@ function reconcileWithKnownFiles(
   const known = new Set(knownPaths);
   const seen = new Set<string>();
 
-  const groups: Group[] = result.groups
-    .map((g) => ({
-      ...g,
-      files: g.files.filter((f) => known.has(f.path) && !seen.has(f.path)),
-    }))
-    .filter((g) => g.files.length > 0);
-  groups.forEach((g) => g.files.forEach((f) => seen.add(f.path)));
+  // Sequential, not map+forEach: a file the model assigned to two different
+  // groups must be claimed by whichever group we process first and dropped
+  // from the rest, so `seen` has to be live (mutated) as we go rather than
+  // populated only after every group's files were already filtered.
+  const groups: Group[] = [];
+  for (const g of result.groups) {
+    const files = g.files.filter((f) => known.has(f.path) && !seen.has(f.path));
+    files.forEach((f) => seen.add(f.path));
+    if (files.length > 0) groups.push({ ...g, files });
+  }
 
   const ungrouped = result.ungrouped.filter(
     (u) => known.has(u.path) && !seen.has(u.path)

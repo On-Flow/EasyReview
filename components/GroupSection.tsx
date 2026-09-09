@@ -12,6 +12,8 @@ interface GroupSectionProps {
   viewType: "unified" | "split";
   commentsByPath: Map<string, ReviewComment[]>;
   defaultExpanded: boolean;
+  reviewedHunkIds: Set<string>;
+  onToggleHunkReviewed: (hunkId: string, reviewed: boolean) => void;
 }
 
 const badgeStyles: Record<string, string> = {
@@ -28,6 +30,8 @@ export default function GroupSection({
   viewType,
   commentsByPath,
   defaultExpanded,
+  reviewedHunkIds,
+  onToggleHunkReviewed,
 }: GroupSectionProps) {
   const [expanded, setExpanded] = useState(defaultExpanded);
 
@@ -61,6 +65,8 @@ export default function GroupSection({
                 file={file}
                 viewType={viewType}
                 comments={commentsByPath.get(file.path) ?? []}
+                reviewedHunkIds={reviewedHunkIds}
+                onToggleHunkReviewed={onToggleHunkReviewed}
               />
             ))}
           </div>

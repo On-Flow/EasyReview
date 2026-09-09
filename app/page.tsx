@@ -11,11 +11,12 @@ export default function Home() {
   const [prNumberInput, setPrNumberInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<(PrLoadResult & { fromCache?: boolean }) | null>(
-    null
-  );
+  const [result, setResult] = useState<
+    (PrLoadResult & { fromCache?: boolean; reviewedHunkIds: string[] }) | null
+  >(null);
   const [cachedPrs, setCachedPrs] = useState<CachedPrSummary[]>([]);
   const [viewType, setViewType] = useState<"unified" | "split">("unified");
+  const [reviewedHunkIds, setReviewedHunkIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     fetch("/api/cached")
@@ -38,11 +39,38 @@ export default function Home() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Failed to load PR");
       setResult(data);
+      setReviewedHunkIds(new Set<string>(data.reviewedHunkIds ?? []));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load PR");
     } finally {
       setLoading(false);
     }
+  }
+
+  function toggleHunkReviewed(hunkId: string, reviewed: boolean) {
+    if (!result) return;
+    const prNumber = result.pr.number;
+
+    setReviewedHunkIds((prev) => {
+      const next = new Set(prev);
+      if (reviewed) next.add(hunkId);
+      else next.delete(hunkId);
+      return next;
+    });
+
+    fetch(`/api/pr/${prNumber}/reviewed`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ hunkId, reviewed }),
+    }).catch(() => {
+      // Revert on failure so the UI doesn't claim a state that isn't persisted.
+      setReviewedHunkIds((prev) => {
+        const next = new Set(prev);
+        if (reviewed) next.delete(hunkId);
+        else next.add(hunkId);
+        return next;
+      });
+    });
   }
 
   const filesByPath = useMemo(() => {
@@ -184,6 +212,8 @@ export default function Home() {
                     viewType={viewType}
                     commentsByPath={commentsByPath}
                     defaultExpanded={group.significance === "significant"}
+                    reviewedHunkIds={reviewedHunkIds}
+                    onToggleHunkReviewed={toggleHunkReviewed}
                   />
                 );
               })}
@@ -201,6 +231,8 @@ export default function Home() {
                 viewType={viewType}
                 commentsByPath={commentsByPath}
                 defaultExpanded={false}
+                reviewedHunkIds={reviewedHunkIds}
+                onToggleHunkReviewed={toggleHunkReviewed}
               />
             )}
           </div>
