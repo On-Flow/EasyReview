@@ -1,4 +1,5 @@
 import type { IssueComment, Review } from "@/lib/types";
+import Markdown from "./Markdown";
 
 export default function ConversationPanel({
   issueComments,
@@ -42,7 +43,7 @@ export default function ConversationPanel({
             <span className="text-xs text-gray-500 ml-2">
               {item.at ? new Date(item.at).toLocaleString() : ""}
             </span>
-            <p className="whitespace-pre-wrap text-gray-700 dark:text-gray-300">{item.body}</p>
+            <Markdown>{item.body}</Markdown>
           </div>
         ))}
       </div>

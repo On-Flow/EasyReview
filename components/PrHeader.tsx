@@ -1,4 +1,5 @@
 import type { PrMeta } from "@/lib/types";
+import Markdown from "./Markdown";
 
 export default function PrHeader({ pr }: { pr: PrMeta }) {
   return (
@@ -14,9 +15,9 @@ export default function PrHeader({ pr }: { pr: PrMeta }) {
         <code className="text-xs">{pr.baseRef}</code> · {pr.state}
       </p>
       {pr.body && (
-        <p className="mt-3 text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap max-h-40 overflow-y-auto">
-          {pr.body}
-        </p>
+        <div className="mt-3 max-h-40 overflow-y-auto">
+          <Markdown>{pr.body}</Markdown>
+        </div>
       )}
     </div>
   );

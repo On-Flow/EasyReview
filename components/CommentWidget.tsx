@@ -1,4 +1,5 @@
 import type { ReviewComment } from "@/lib/types";
+import Markdown from "./Markdown";
 
 export default function CommentWidget({ comments }: { comments: ReviewComment[] }) {
   return (
@@ -12,7 +13,7 @@ export default function CommentWidget({ comments }: { comments: ReviewComment[] 
           <span className="text-gray-500 text-xs ml-2">
             {new Date(c.createdAt).toLocaleString()}
           </span>
-          <p className="whitespace-pre-wrap">{c.body}</p>
+          <Markdown>{c.body}</Markdown>
         </div>
       ))}
     </div>

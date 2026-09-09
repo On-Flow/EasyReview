@@ -60,7 +60,11 @@ export default function Home() {
   }, [result]);
 
   return (
-    <div className="max-w-5xl mx-auto w-full px-6 py-8 space-y-6">
+    <div
+      className={`${
+        viewType === "split" ? "max-w-[1800px]" : "max-w-5xl"
+      } mx-auto w-full px-6 py-8 space-y-6 transition-[max-width]`}
+    >
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold">PR Review Grouping Tool</h1>
