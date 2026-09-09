@@ -104,3 +104,24 @@ export interface PrLoadResult {
   groupingMeta: GroupingMeta;
   fetchedAt: string;
 }
+
+export type AiCommentSeverity = "high" | "moderate" | "minor" | "nit";
+
+// An LLM-generated review comment, kept structurally close to ReviewComment
+// (same path/line/side shape) so it can reuse the same diff-anchoring logic,
+// but tracked separately - it's ephemeral (not cached/persisted) and always
+// visually distinct from a real human comment.
+export interface AiComment {
+  id: string;
+  path: string;
+  line: number | null;
+  side: "LEFT" | "RIGHT" | null;
+  body: string;
+  severity: AiCommentSeverity;
+}
+
+export interface AiReviewMeta {
+  model: string;
+  fallback: boolean;
+  error?: string;
+}

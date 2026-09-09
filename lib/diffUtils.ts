@@ -1,5 +1,6 @@
-import { getChangeKey, type ChangeData, type HunkData } from "react-diff-view";
-import type { PrFile, ReviewComment } from "./types";
+import { getChangeKey, parseDiff, type ChangeData, type HunkData } from "react-diff-view";
+import type { PrFile } from "./types";
+import { computeHunkId } from "./hunkId";
 
 // GitHub's `files[].patch` is just the hunk lines (starting with `@@`), with
 // no `diff --git` header. react-diff-view (via gitdiff-parser) needs that
@@ -35,16 +36,37 @@ export function buildSyntheticDiff(file: PrFile): string {
   return lines.join("\n");
 }
 
-// Find the react-diff-view change key a GitHub review comment anchors to, so
-// it can be rendered as an inline widget rather than falling back to the
-// sidebar list. Returns null if the comment's line isn't present in the
-// rendered hunks (e.g. it's on an outdated diff, or on unchanged context
-// outside any hunk).
+// All hunk ids for a file, for "mark whole file/group reviewed" actions that
+// need to toggle every hunk at once without duplicating a diff parse per call
+// site.
+export function getFileHunkIds(file: PrFile): string[] {
+  if (!file.patch) return [];
+  try {
+    const [parsed] = parseDiff(buildSyntheticDiff(file));
+    if (!parsed) return [];
+    return parsed.hunks.map((h) => computeHunkId(file.path, h.content));
+  } catch {
+    return [];
+  }
+}
+
+// Minimal shape needed to anchor a comment to a diff line - both ReviewComment
+// (human, from GitHub) and AiComment (LLM-generated) satisfy this structurally.
+export interface AnchorableComment {
+  line: number | null;
+  originalLine?: number | null;
+  side: "LEFT" | "RIGHT" | null;
+}
+
+// Find the react-diff-view change key a comment anchors to, so it can be
+// rendered as an inline widget rather than falling back to the sidebar list.
+// Returns null if the comment's line isn't present in the rendered hunks
+// (e.g. it's on an outdated diff, or on unchanged context outside any hunk).
 export function findWidgetChangeKey(
   hunks: HunkData[],
-  comment: ReviewComment
+  comment: AnchorableComment
 ): string | null {
-  const targetLine = comment.line ?? comment.originalLine;
+  const targetLine = comment.line ?? comment.originalLine ?? null;
   if (targetLine == null) return null;
 
   const wantsOldSide = comment.side === "LEFT";

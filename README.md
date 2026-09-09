@@ -97,7 +97,23 @@ something else pulled locally.
    if a later commit changes that hunk, the id changes and the old mark simply
    stops matching anything — reviewed state falls away for changed hunks
    without any explicit invalidation logic. Unchanged hunks stay marked across
-   commits touching *other* parts of the PR.
+   commits touching *other* parts of the PR. "Mark file reviewed" and "Mark
+   group reviewed" do the same in bulk (one batched SQLite transaction, not
+   one request per hunk).
+9. "AI review group" (per group, and on the uncategorised section) sends that
+   group's files to Ollama and asks for line-anchored review comments — real
+   issues only (bugs, edge cases, security/performance concerns), explicitly
+   told to return fewer comments (or none) rather than invent filler. Reuses
+   the exact same diff-line-anchoring logic as human GitHub comments, so they
+   render as inline widgets the same way, just visually distinct (indigo "AI
+   review" badge vs. the blue "Human review comment" one) and stack together
+   when both land on the same line. Ephemeral by design — not persisted, not
+   cached, cleared on reload — since it's an optional, re-runnable pass rather
+   than part of the PR's record. Scoped to one group's files per call rather
+   than the whole PR (smaller prompt, faster, and there's no chunk+merge path
+   for it — a group too large for the context window just fails gracefully
+   with an error rather than adding chunking machinery for what's meant to be
+   a quick, optional check).
 
 ## Stack
 

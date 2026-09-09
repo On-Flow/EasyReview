@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { setHunkReviewed } from "@/lib/reviewed";
+import { setHunksReviewed } from "@/lib/reviewed";
 
 export async function POST(
   request: Request,
@@ -12,15 +12,20 @@ export async function POST(
   }
 
   const body = await request.json().catch(() => null);
-  const hunkId = body?.hunkId;
+  const hunkIds = body?.hunkIds;
   const reviewed = body?.reviewed;
-  if (typeof hunkId !== "string" || !hunkId || typeof reviewed !== "boolean") {
+  if (
+    !Array.isArray(hunkIds) ||
+    hunkIds.length === 0 ||
+    !hunkIds.every((id) => typeof id === "string" && id) ||
+    typeof reviewed !== "boolean"
+  ) {
     return NextResponse.json(
-      { error: "Body must be { hunkId: string, reviewed: boolean }" },
+      { error: "Body must be { hunkIds: string[], reviewed: boolean }" },
       { status: 400 }
     );
   }
 
-  setHunkReviewed(prNumber, hunkId, reviewed);
+  setHunksReviewed(prNumber, hunkIds, reviewed);
   return NextResponse.json({ ok: true });
 }

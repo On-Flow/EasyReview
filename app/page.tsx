@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import type { PrLoadResult, PrFile, ReviewComment } from "@/lib/types";
+import type { PrLoadResult, PrFile, ReviewComment, AiComment } from "@/lib/types";
 import type { CachedPrSummary } from "@/lib/cache";
 import PrHeader from "@/components/PrHeader";
 import GroupSection from "@/components/GroupSection";
@@ -17,6 +17,13 @@ export default function Home() {
   const [cachedPrs, setCachedPrs] = useState<CachedPrSummary[]>([]);
   const [viewType, setViewType] = useState<"unified" | "split">("unified");
   const [reviewedHunkIds, setReviewedHunkIds] = useState<Set<string>>(new Set());
+  const [aiCommentsByPath, setAiCommentsByPath] = useState<Map<string, AiComment[]>>(
+    new Map()
+  );
+  const [aiReviewingGroups, setAiReviewingGroups] = useState<Set<string>>(new Set());
+  const [aiReviewResults, setAiReviewResults] = useState<
+    Map<string, { count: number; error?: string }>
+  >(new Map());
 
   useEffect(() => {
     fetch("/api/cached")
@@ -34,6 +41,8 @@ export default function Home() {
     setLoading(true);
     setError(null);
     setResult(null);
+    setAiCommentsByPath(new Map());
+    setAiReviewResults(new Map());
     try {
       const res = await fetch(`/api/pr/${n}/load`, { method: "POST" });
       const data = await res.json();
@@ -47,30 +56,87 @@ export default function Home() {
     }
   }
 
-  function toggleHunkReviewed(hunkId: string, reviewed: boolean) {
-    if (!result) return;
+  function toggleHunksReviewed(hunkIds: string[], reviewed: boolean) {
+    if (!result || hunkIds.length === 0) return;
     const prNumber = result.pr.number;
 
     setReviewedHunkIds((prev) => {
       const next = new Set(prev);
-      if (reviewed) next.add(hunkId);
-      else next.delete(hunkId);
+      for (const id of hunkIds) {
+        if (reviewed) next.add(id);
+        else next.delete(id);
+      }
       return next;
     });
 
     fetch(`/api/pr/${prNumber}/reviewed`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ hunkId, reviewed }),
+      body: JSON.stringify({ hunkIds, reviewed }),
     }).catch(() => {
       // Revert on failure so the UI doesn't claim a state that isn't persisted.
       setReviewedHunkIds((prev) => {
         const next = new Set(prev);
-        if (reviewed) next.delete(hunkId);
-        else next.add(hunkId);
+        for (const id of hunkIds) {
+          if (reviewed) next.delete(id);
+          else next.add(id);
+        }
         return next;
       });
     });
+  }
+
+  async function runAiReview(groupId: string, files: PrFile[]) {
+    if (!result) return;
+    const reviewableFiles = files.filter(
+      (f): f is PrFile & { patch: string } => typeof f.patch === "string"
+    );
+    if (reviewableFiles.length === 0) return;
+
+    setAiReviewingGroups((prev) => new Set(prev).add(groupId));
+    try {
+      const res = await fetch(`/api/pr/${result.pr.number}/ai-review`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          files: reviewableFiles.map((f) => ({ path: f.path, patch: f.patch })),
+          prTitle: result.pr.title,
+          prBody: result.pr.body,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "AI review failed");
+
+      const comments = data.comments as AiComment[];
+      setAiCommentsByPath((prev) => {
+        const next = new Map(prev);
+        // Replace (not append) any prior AI comments for the files just
+        // re-reviewed, so clicking the button again doesn't duplicate them.
+        for (const f of reviewableFiles) next.delete(f.path);
+        for (const c of comments) {
+          next.set(c.path, [...(next.get(c.path) ?? []), c]);
+        }
+        return next;
+      });
+
+      if (data.meta?.fallback) {
+        const message = data.meta.error ?? "failed to produce comments";
+        setAiReviewResults((prev) => new Map(prev).set(groupId, { count: 0, error: message }));
+        setError(`AI review: ${message}`);
+      } else {
+        setAiReviewResults((prev) => new Map(prev).set(groupId, { count: comments.length }));
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "AI review failed";
+      setAiReviewResults((prev) => new Map(prev).set(groupId, { count: 0, error: message }));
+      setError(message);
+    } finally {
+      setAiReviewingGroups((prev) => {
+        const next = new Set(prev);
+        next.delete(groupId);
+        return next;
+      });
+    }
   }
 
   const filesByPath = useMemo(() => {
@@ -211,30 +277,42 @@ export default function Home() {
                     files={files}
                     viewType={viewType}
                     commentsByPath={commentsByPath}
+                    aiCommentsByPath={aiCommentsByPath}
                     defaultExpanded={group.significance === "significant"}
                     reviewedHunkIds={reviewedHunkIds}
-                    onToggleHunkReviewed={toggleHunkReviewed}
+                    onToggleHunksReviewed={toggleHunksReviewed}
+                    onRunAiReview={() => runAiReview(group.id, files)}
+                    aiReviewing={aiReviewingGroups.has(group.id)}
+                    aiReviewResult={aiReviewResults.get(group.id)}
                   />
                 );
               })}
 
-            {result.grouping.ungrouped.length > 0 && (
-              <GroupSection
-                title="Uncategorised (not grouped by AI)"
-                narrative={result.grouping.ungrouped
-                  .map((u) => `${u.path}: ${u.reason}`)
-                  .join(" · ")}
-                significance="uncategorised"
-                files={result.grouping.ungrouped
+            {result.grouping.ungrouped.length > 0 &&
+              (() => {
+                const ungroupedFiles = result.grouping.ungrouped
                   .map((u) => filesByPath.get(u.path))
-                  .filter((f): f is PrFile => Boolean(f))}
-                viewType={viewType}
-                commentsByPath={commentsByPath}
-                defaultExpanded={false}
-                reviewedHunkIds={reviewedHunkIds}
-                onToggleHunkReviewed={toggleHunkReviewed}
-              />
-            )}
+                  .filter((f): f is PrFile => Boolean(f));
+                return (
+                  <GroupSection
+                    title="Uncategorised (not grouped by AI)"
+                    narrative={result.grouping.ungrouped
+                      .map((u) => `${u.path}: ${u.reason}`)
+                      .join(" · ")}
+                    significance="uncategorised"
+                    files={ungroupedFiles}
+                    viewType={viewType}
+                    commentsByPath={commentsByPath}
+                    aiCommentsByPath={aiCommentsByPath}
+                    defaultExpanded={false}
+                    reviewedHunkIds={reviewedHunkIds}
+                    onToggleHunksReviewed={toggleHunksReviewed}
+                    onRunAiReview={() => runAiReview("ungrouped", ungroupedFiles)}
+                    aiReviewing={aiReviewingGroups.has("ungrouped")}
+                    aiReviewResult={aiReviewResults.get("ungrouped")}
+                  />
+                );
+              })()}
           </div>
 
           <ConversationPanel

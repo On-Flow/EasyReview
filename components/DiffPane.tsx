@@ -3,25 +3,29 @@
 import { useMemo } from "react";
 import { Diff, Hunk, Decoration, parseDiff } from "react-diff-view";
 import type { HunkData } from "react-diff-view";
-import type { PrFile, ReviewComment } from "@/lib/types";
+import type { PrFile, ReviewComment, AiComment } from "@/lib/types";
 import { buildSyntheticDiff, findWidgetChangeKey } from "@/lib/diffUtils";
 import { computeHunkId } from "@/lib/hunkId";
 import CommentWidget from "./CommentWidget";
+import AiCommentWidget from "./AiCommentWidget";
+import ReviewToggleButton from "./ReviewToggleButton";
 
 interface DiffPaneProps {
   file: PrFile;
   viewType: "unified" | "split";
   comments: ReviewComment[];
+  aiComments: AiComment[];
   reviewedHunkIds: Set<string>;
-  onToggleHunkReviewed: (hunkId: string, reviewed: boolean) => void;
+  onToggleHunksReviewed: (hunkIds: string[], reviewed: boolean) => void;
 }
 
 export default function DiffPane({
   file,
   viewType,
   comments,
+  aiComments,
   reviewedHunkIds,
-  onToggleHunkReviewed,
+  onToggleHunksReviewed,
 }: DiffPaneProps) {
   const parsed = useMemo(() => {
     if (!file.patch) return null;
@@ -33,32 +37,58 @@ export default function DiffPane({
     }
   }, [file]);
 
-  const { widgets, unanchored } = useMemo(() => {
-    if (!parsed) return { widgets: {}, unanchored: comments };
+  const { widgets, unanchored, unanchoredAi } = useMemo(() => {
+    if (!parsed) {
+      return { widgets: {}, unanchored: comments, unanchoredAi: aiComments };
+    }
     const widgetMap: Record<string, React.ReactNode> = {};
     const leftover: ReviewComment[] = [];
+    const leftoverAi: AiComment[] = [];
 
     // Group comments by change key so multiple comments on one line share a widget.
-    const byKey = new Map<string, ReviewComment[]>();
+    const humanByKey = new Map<string, ReviewComment[]>();
     for (const comment of comments) {
       const key = findWidgetChangeKey(parsed.hunks, comment);
       if (key) {
-        byKey.set(key, [...(byKey.get(key) ?? []), comment]);
+        humanByKey.set(key, [...(humanByKey.get(key) ?? []), comment]);
       } else {
         leftover.push(comment);
       }
     }
-    for (const [key, list] of byKey) {
-      widgetMap[key] = <CommentWidget comments={list} />;
-    }
-    return { widgets: widgetMap, unanchored: leftover };
-  }, [parsed, comments]);
 
-  const reviewedCount = useMemo(() => {
-    if (!parsed) return 0;
-    return parsed.hunks.filter((h) => reviewedHunkIds.has(computeHunkId(file.path, h.content)))
-      .length;
-  }, [parsed, reviewedHunkIds, file.path]);
+    const aiByKey = new Map<string, AiComment[]>();
+    for (const comment of aiComments) {
+      const key = findWidgetChangeKey(parsed.hunks, comment);
+      if (key) {
+        aiByKey.set(key, [...(aiByKey.get(key) ?? []), comment]);
+      } else {
+        leftoverAi.push(comment);
+      }
+    }
+
+    for (const key of new Set([...humanByKey.keys(), ...aiByKey.keys()])) {
+      const humanList = humanByKey.get(key);
+      const aiList = aiByKey.get(key);
+      widgetMap[key] = (
+        <>
+          {humanList && <CommentWidget comments={humanList} />}
+          {aiList && <AiCommentWidget comments={aiList} />}
+        </>
+      );
+    }
+
+    return { widgets: widgetMap, unanchored: leftover, unanchoredAi: leftoverAi };
+  }, [parsed, comments, aiComments]);
+
+  const fileHunkIds = useMemo(() => {
+    if (!parsed) return [];
+    return parsed.hunks.map((h) => computeHunkId(file.path, h.content));
+  }, [parsed, file.path]);
+
+  const reviewedCount = useMemo(
+    () => fileHunkIds.filter((id) => reviewedHunkIds.has(id)).length,
+    [fileHunkIds, reviewedHunkIds]
+  );
 
   if (!file.patch || !parsed) {
     return (
@@ -75,17 +105,15 @@ export default function DiffPane({
     if (isReviewed) {
       return (
         <Decoration key={`d-${hunk.content}`}>
-          <div className="flex items-center justify-between px-3 py-1 bg-green-50 dark:bg-green-950/30 text-xs text-green-700 dark:text-green-400">
+          <div className="flex items-center justify-between px-3 py-1.5 bg-green-50 dark:bg-green-950/30 text-xs text-green-700 dark:text-green-400">
             <span>
-              ✓ Reviewed — lines {hunk.newStart}-{hunk.newStart + hunk.newLines}
+              Reviewed — lines {hunk.newStart}-{hunk.newStart + hunk.newLines}
             </span>
-            <button
-              type="button"
-              onClick={() => onToggleHunkReviewed(hunkId, false)}
-              className="underline hover:no-underline"
-            >
-              Mark unreviewed
-            </button>
+            <ReviewToggleButton
+              reviewed
+              scopeLabel="hunk"
+              onClick={() => onToggleHunksReviewed([hunkId], false)}
+            />
           </div>
         </Decoration>
       );
@@ -93,14 +121,12 @@ export default function DiffPane({
 
     return [
       <Decoration key={`d-${hunk.content}`}>
-        <div className="flex justify-end px-3 py-1 bg-gray-50 dark:bg-gray-900 text-xs">
-          <button
-            type="button"
-            onClick={() => onToggleHunkReviewed(hunkId, true)}
-            className="text-gray-500 hover:text-gray-800 dark:hover:text-gray-200"
-          >
-            Mark reviewed
-          </button>
+        <div className="flex justify-end px-3 py-1.5 bg-gray-50 dark:bg-gray-900 text-xs">
+          <ReviewToggleButton
+            reviewed={false}
+            scopeLabel="hunk"
+            onClick={() => onToggleHunksReviewed([hunkId], true)}
+          />
         </div>
       </Decoration>,
       <Hunk key={`h-${hunk.content}`} hunk={hunk} />,
@@ -117,9 +143,18 @@ export default function DiffPane({
           <span className="ml-2 text-green-600">+{file.additions}</span>{" "}
           <span className="text-red-600">-{file.deletions}</span>
         </span>
-        {parsed.hunks.length > 0 && (
-          <span className="text-gray-400">
-            {reviewedCount}/{parsed.hunks.length} hunks reviewed
+        {fileHunkIds.length > 0 && (
+          <span className="flex items-center gap-2 shrink-0">
+            <span className="text-gray-400">
+              {reviewedCount}/{fileHunkIds.length} hunks reviewed
+            </span>
+            <ReviewToggleButton
+              reviewed={reviewedCount === fileHunkIds.length}
+              scopeLabel="file"
+              onClick={() =>
+                onToggleHunksReviewed(fileHunkIds, reviewedCount < fileHunkIds.length)
+              }
+            />
           </span>
         )}
       </div>
@@ -143,6 +178,24 @@ export default function DiffPane({
                 {c.path}:{c.line ?? c.originalLine ?? "?"}
               </span>{" "}
               <span className="font-medium">{c.author}</span>: {c.body}
+            </div>
+          ))}
+        </div>
+      )}
+      {unanchoredAi.length > 0 && (
+        <div className="border-t border-gray-200 dark:border-gray-800 bg-indigo-50 dark:bg-indigo-950/30 p-3 space-y-2">
+          <p className="text-xs font-medium text-indigo-700 dark:text-indigo-400">
+            AI review comments not anchored to a visible line:
+          </p>
+          {unanchoredAi.map((c) => (
+            <div key={c.id} className="text-sm">
+              <span className="font-mono text-xs text-gray-500">
+                {c.path}:{c.line ?? "?"}
+              </span>{" "}
+              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-indigo-100 dark:bg-indigo-900 text-indigo-700 dark:text-indigo-300">
+                {c.severity}
+              </span>{" "}
+              {c.body}
             </div>
           ))}
         </div>

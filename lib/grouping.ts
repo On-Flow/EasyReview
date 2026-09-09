@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { config } from "./config";
-import { ollamaChatJson, estimateTokens, SINGLE_PASS_TOKEN_BUDGET } from "./ollama";
+import { estimateTokens, SINGLE_PASS_TOKEN_BUDGET } from "./ollama";
+import { callLlmJsonWithRetry, type ChatMsg } from "./llmJson";
 import type {
   PrMeta,
   PrFile,
@@ -30,11 +31,15 @@ const groupingSchema = z.object({
   ungrouped: z.array(z.object({ path: z.string(), reason: z.string() })),
 });
 
-const SYSTEM_PROMPT = `You are a senior engineer reviewing a GitHub pull request. Your job is to split the diff into logical change-groups so a human reviewer can understand the PR faster than reading it file-by-file.
+const SYSTEM_PROMPT = `You are a senior engineer preparing a GitHub pull request for human review. Your output replaces GitHub's file-by-file diff: minor groups render collapsed by default, significant groups render expanded. The entire point is to let the reviewer skip the noise and spend their attention only on what actually matters - so be strict and skeptical about what you call "significant", and work in two passes.
+
+PASS 1 - find the noise first, before grouping anything as significant. Scan every file and pull out anything mechanical: pure renames (variables, functions, files) with no behavioural change, formatting/whitespace, comment/doc-only edits, import reordering, dependency bumps, lockfile/generated-file changes, config tweaks with no behavioural change. Consolidate ALL of this into as few minor groups as make sense - typically one per distinct kind of mechanical change (e.g. one group for "renamed X to Y across N files", a separate one for "dependency bumps" if both are present) - never one minor group per file. If a file mixes a real change with an incidental rename, its group is still significant overall, but call the rename out briefly in the narrative rather than letting it inflate or dilute the description of what actually changed.
+
+PASS 2 - group what's left by logical purpose, not by file. Prefer more, smaller groups over fewer large ones: a group spanning many files, or one whose purpose needs more than 2-3 sentences to explain, is almost always actually two or more distinct concerns - split it. Each group should be narrow enough that its title alone tells the reviewer exactly what to expect, with every file in it doing the same specific thing for the same specific reason. Never merge two distinct significant changes into one group just because they landed in the same PR or touch the same file.
 
 Rules:
-- Group by logical purpose, not by file. One group can span multiple files. One file's changes can split across groups if it's doing unrelated things (rare - prefer one file per group unless it's clearly mixing concerns).
-- significance is "minor" for docs, comments, formatting, renames, dependency bumps, or config tweaks with no behavioural change. Everything else is "significant".
+- One group can span multiple files. One file's changes can split across groups if it's doing genuinely unrelated things (rare).
+- significance is "minor" only for the mechanical/noise categories from PASS 1. Everything else is "significant" - but a "significant" group should still be about ONE specific behavioural change, never several bundled together.
 - Each group needs a short title (< 8 words) and a 1-3 sentence narrative in plain English explaining what the group does and why, based on reading the diff - do not just restate line-by-line what changed.
 - If existing review comments are attached to a file, use them to inform your narrative and avoid repeating what a human reviewer already said, but do not merge their comments into your narrative or quote them.
 - Reference files by their exact path as given.
@@ -60,22 +65,6 @@ function buildSinglePassPrompt(
   const header = `PR #${pr.number}: ${pr.title}\n\n${pr.body ?? "(no description)"}\n\n---\n`;
   const fileBlocks = files.map((f) => formatFileForPrompt(f, comments)).join("\n\n");
   return `${header}\n${fileBlocks}`;
-}
-
-function stripJsonFences(raw: string): string {
-  const trimmed = raw.trim();
-  const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
-  return fenced ? fenced[1] : trimmed;
-}
-
-function tryParseGrouping(raw: string): GroupingResult | null {
-  try {
-    const parsed = JSON.parse(stripJsonFences(raw));
-    const validated = groupingSchema.parse(parsed);
-    return validated;
-  } catch {
-    return null;
-  }
 }
 
 function reconcileWithKnownFiles(
@@ -110,21 +99,6 @@ function reconcileWithKnownFiles(
   return { groups, ungrouped };
 }
 
-async function callWithRetry(
-  buildMessages: (retryContext?: string) => { role: "system" | "user"; content: string }[]
-): Promise<GroupingResult | null> {
-  const first = await ollamaChatJson(buildMessages());
-  const parsedFirst = tryParseGrouping(first);
-  if (parsedFirst) return parsedFirst;
-
-  const second = await ollamaChatJson(
-    buildMessages(
-      `Your previous response was not valid JSON matching the required schema. Raw response was:\n${first.slice(0, 2000)}\n\nReturn ONLY the corrected JSON object, nothing else.`
-    )
-  );
-  return tryParseGrouping(second);
-}
-
 function fallbackResult(files: PrFile[]): GroupingResult {
   return {
     groups: [],
@@ -141,8 +115,8 @@ async function groupSinglePass(
   comments: PrComments
 ): Promise<GroupingResult | null> {
   const userContent = buildSinglePassPrompt(pr, files, comments);
-  return callWithRetry((retryContext) => {
-    const messages: { role: "system" | "user"; content: string }[] = [
+  return callLlmJsonWithRetry(groupingSchema, (retryContext) => {
+    const messages: ChatMsg[] = [
       { role: "system", content: SYSTEM_PROMPT },
       { role: "user", content: userContent },
     ];
@@ -201,7 +175,7 @@ async function groupChunked(
     };
   }
 
-  const mergePrompt = `This PR was too large to review in one pass, so it was split into ${chunks.length} chunks and grouped separately. Merge duplicate or near-duplicate groups below into a final grouping. Keep distinct groups distinct. Preserve every file path exactly (don't drop any). You may rewrite titles/narratives for clarity when merging.
+  const mergePrompt = `This PR was too large to review in one pass, so it was split into ${chunks.length} chunks and grouped separately. Merge duplicate or near-duplicate groups below into a final grouping - each chunk may have produced its own separate minor bucket for the same kind of noise (e.g. renames), merge those into one. Otherwise keep distinct significant groups distinct: don't merge two different behavioural changes into one group just because they came from different chunks of the same PR - more, smaller groups is still better than fewer large ones. Preserve every file path exactly (don't drop any). You may rewrite titles/narratives for clarity when merging.
 
 Provisional groups:
 ${JSON.stringify(mergeInput.map((g) => ({ title: g.title, narrative: g.narrative, significance: g.significance, files: g.files.map((f) => f.path) })), null, 2)}
@@ -211,8 +185,8 @@ ${JSON.stringify(mergeUngrouped, null, 2)}
 
 Respond with strict JSON only, matching the same schema as before.`;
 
-  const merged = await callWithRetry((retryContext) => {
-    const messages: { role: "system" | "user"; content: string }[] = [
+  const merged = await callLlmJsonWithRetry(groupingSchema, (retryContext) => {
+    const messages: ChatMsg[] = [
       { role: "system", content: SYSTEM_PROMPT },
       { role: "user", content: mergePrompt },
     ];
