@@ -3,9 +3,11 @@
 import { useEffect, useMemo, useState } from "react";
 import type { PrLoadResult, PrFile, ReviewComment, AiComment } from "@/lib/types";
 import type { CachedPrSummary } from "@/lib/cache";
+import { getFileHunkIds } from "@/lib/diffUtils";
 import PrHeader from "@/components/PrHeader";
 import GroupSection from "@/components/GroupSection";
 import ConversationPanel from "@/components/ConversationPanel";
+import ReviewProgressBadge from "@/components/ReviewProgressBadge";
 
 export default function Home() {
   const [prNumberInput, setPrNumberInput] = useState("");
@@ -153,6 +155,15 @@ export default function Home() {
     return map;
   }, [result]);
 
+  const allHunkIdsInPr = useMemo(() => {
+    if (!result) return [];
+    return result.files.flatMap(getFileHunkIds);
+  }, [result]);
+  const totalReviewedCount = useMemo(
+    () => allHunkIdsInPr.filter((id) => reviewedHunkIds.has(id)).length,
+    [allHunkIdsInPr, reviewedHunkIds]
+  );
+
   return (
     <div
       className={`${
@@ -218,6 +229,22 @@ export default function Home() {
       {result && (
         <div className="space-y-6">
           <PrHeader pr={result.pr} />
+
+          {allHunkIdsInPr.length > 0 && (
+            <div className="flex items-center gap-3 rounded-lg border border-gray-200 dark:border-gray-800 px-4 py-3">
+              <ReviewProgressBadge reviewed={totalReviewedCount} total={allHunkIdsInPr.length} size="md" />
+              <div className="flex-1 h-2 rounded-full bg-gray-100 dark:bg-gray-800 overflow-hidden">
+                <div
+                  className={`h-full rounded-full transition-all ${
+                    totalReviewedCount === allHunkIdsInPr.length ? "bg-green-500" : "bg-amber-400"
+                  }`}
+                  style={{
+                    width: `${Math.round((totalReviewedCount / allHunkIdsInPr.length) * 100)}%`,
+                  }}
+                />
+              </div>
+            </div>
+          )}
 
           {result.groupingMeta.fallback && (
             <div className="rounded border border-amber-300 bg-amber-50 dark:bg-amber-950/40 dark:border-amber-800 text-amber-800 dark:text-amber-300 text-sm px-4 py-3">

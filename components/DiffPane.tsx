@@ -1,14 +1,17 @@
 "use client";
 
 import { useMemo } from "react";
-import { Diff, Hunk, Decoration, parseDiff } from "react-diff-view";
+import { Diff, Hunk, Decoration, parseDiff, tokenize } from "react-diff-view";
 import type { HunkData } from "react-diff-view";
+import refractor from "refractor";
 import type { PrFile, ReviewComment, AiComment } from "@/lib/types";
 import { buildSyntheticDiff, findWidgetChangeKey } from "@/lib/diffUtils";
 import { computeHunkId } from "@/lib/hunkId";
+import { languageForPath } from "@/lib/syntaxLanguage";
 import CommentWidget from "./CommentWidget";
 import AiCommentWidget from "./AiCommentWidget";
 import ReviewToggleButton from "./ReviewToggleButton";
+import ReviewProgressBadge from "./ReviewProgressBadge";
 
 interface DiffPaneProps {
   file: PrFile;
@@ -85,6 +88,19 @@ export default function DiffPane({
     return parsed.hunks.map((h) => computeHunkId(file.path, h.content));
   }, [parsed, file.path]);
 
+  const tokens = useMemo(() => {
+    if (!parsed) return undefined;
+    const language = languageForPath(file.path);
+    if (!language) return undefined;
+    try {
+      return tokenize(parsed.hunks, { highlight: true, refractor, language });
+    } catch {
+      // Malformed/partial snippets can occasionally trip up the tokenizer -
+      // fall back to plain text rather than losing the diff over it.
+      return undefined;
+    }
+  }, [parsed, file.path]);
+
   const reviewedCount = useMemo(
     () => fileHunkIds.filter((id) => reviewedHunkIds.has(id)).length,
     [fileHunkIds, reviewedHunkIds]
@@ -145,9 +161,7 @@ export default function DiffPane({
         </span>
         {fileHunkIds.length > 0 && (
           <span className="flex items-center gap-2 shrink-0">
-            <span className="text-gray-400">
-              {reviewedCount}/{fileHunkIds.length} hunks reviewed
-            </span>
+            <ReviewProgressBadge reviewed={reviewedCount} total={fileHunkIds.length} />
             <ReviewToggleButton
               reviewed={reviewedCount === fileHunkIds.length}
               scopeLabel="file"
@@ -163,6 +177,7 @@ export default function DiffPane({
         diffType={parsed.type}
         hunks={parsed.hunks}
         widgets={widgets}
+        tokens={tokens}
         gutterType="default"
       >
         {(hunks) => hunks.flatMap(renderHunk)}

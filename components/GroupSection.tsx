@@ -5,6 +5,7 @@ import type { PrFile, ReviewComment, AiComment, Significance } from "@/lib/types
 import { getFileHunkIds } from "@/lib/diffUtils";
 import DiffPane from "./DiffPane";
 import ReviewToggleButton from "./ReviewToggleButton";
+import ReviewProgressBadge from "./ReviewProgressBadge";
 
 interface GroupSectionProps {
   title: string;
@@ -51,10 +52,23 @@ export default function GroupSection({
     [allHunkIds, reviewedHunkIds]
   );
   const reviewableFileCount = useMemo(() => files.filter((f) => f.patch).length, [files]);
+  const fullyReviewed = allHunkIds.length > 0 && reviewedCount === allHunkIds.length;
 
   return (
-    <section className="rounded-lg border border-gray-200 dark:border-gray-800 overflow-hidden">
-      <div className="w-full flex flex-wrap items-center gap-3 px-4 py-3 bg-white dark:bg-gray-950 hover:bg-gray-50 dark:hover:bg-gray-900">
+    <section
+      className={`rounded-lg border overflow-hidden ${
+        fullyReviewed
+          ? "border-green-300 dark:border-green-800"
+          : "border-gray-200 dark:border-gray-800"
+      }`}
+    >
+      <div
+        className={`w-full flex flex-wrap items-center gap-3 px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-900 ${
+          fullyReviewed
+            ? "bg-green-50/60 dark:bg-green-950/20"
+            : "bg-white dark:bg-gray-950"
+        }`}
+      >
         <button
           type="button"
           onClick={() => setExpanded((e) => !e)}
@@ -66,11 +80,7 @@ export default function GroupSection({
         <span className={`text-xs px-2 py-0.5 rounded-full shrink-0 ${badgeStyles[significance]}`}>
           {significance}
         </span>
-        {allHunkIds.length > 0 && (
-          <span className="text-xs text-gray-400 shrink-0">
-            {reviewedCount}/{allHunkIds.length} hunks reviewed
-          </span>
-        )}
+        <ReviewProgressBadge reviewed={reviewedCount} total={allHunkIds.length} />
         <span className="text-xs text-gray-500 shrink-0">
           {files.length} file{files.length === 1 ? "" : "s"}
         </span>

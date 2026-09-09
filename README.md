@@ -64,6 +64,19 @@ something else pulled locally.
   hunk's id is a hash of its own content, so a mark just stops applying once
   that hunk changes, rather than trying to track renames/moves/whitespace
   reflows across commits.
+- **Syntax highlighting library version**: pinned to `refractor@2.10.1`, not
+  the current `5.x`. `react-diff-view` (last published 2023) integrates with
+  refractor's *old* API where `.highlight()` returns a bare array of nodes;
+  refractor rewrote that in v3+ to return a full hast root object, which makes
+  `react-diff-view`'s tokenizer throw. `2.10.1` is what `react-diff-view`
+  itself still declares as its dependency, and it conveniently already bundles
+  all ~213 languages by default (no separate "full" build needed). Known
+  tradeoff: it pulls in an old `prismjs` with published ReDoS/XSS advisories.
+  In this specific usage it's low-risk — tokenization runs client-side only
+  (worst case hangs your own tab, not the server) and output is always
+  rendered through React's normal JSX escaping, never `dangerouslySetInnerHTML`
+  — but it's worth knowing this dependency is intentionally held back, and
+  worth revisiting if this ever becomes more than a local POC.
 
 ## How it works
 
@@ -114,10 +127,23 @@ something else pulled locally.
    for it — a group too large for the context window just fails gracefully
    with an error rather than adding chunking machinery for what's meant to be
    a quick, optional check).
+10. Diff code is syntax-highlighted via `react-diff-view`'s `tokenize()` +
+    `refractor` (a Prism wrapper), based on a file-extension → language lookup
+    (`lib/syntaxLanguage.ts`, ~40 common extensions; unmapped ones just render
+    plain). Colors are a small custom theme (`.token.*` rules in
+    `globals.css`) rather than a stock Prism theme, so it respects the app's
+    light/dark toggle instead of being stuck in one mode.
+11. Review progress (hunks/files/groups marked reviewed) is visually
+    prominent, not just a number: a colored badge (gray → amber → green as it
+    fills up) everywhere a count is shown, a headline progress bar for the
+    whole PR under the header, and a group's border/background tints green
+    once every hunk in it is marked reviewed — scannable at a glance down the
+    page rather than needing to read each count.
 
 ## Stack
 
 Next.js 16 (App Router) + TypeScript, Tailwind, `octokit`, `react-diff-view`,
-`zod`, `react-markdown`. SQLite (`node:sqlite`, built into Node 22+, no extra
-dependency) for both the PR cache and reviewed-hunk state — no auth, API routes
-call GitHub and Ollama server-side so the token never reaches the client.
+`refractor`, `zod`, `react-markdown`. SQLite (`node:sqlite`, built into Node
+22+, no extra dependency) for both the PR cache and reviewed-hunk state — no
+auth, API routes call GitHub and Ollama server-side so the token never reaches
+the client.
