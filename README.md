@@ -147,3 +147,14 @@ Next.js 16 (App Router) + TypeScript, Tailwind, `octokit`, `react-diff-view`,
 22+, no extra dependency) for both the PR cache and reviewed-hunk state — no
 auth, API routes call GitHub and Ollama server-side so the token never reaches
 the client.
+
+## Contributing
+
+Contributions are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for how to
+get set up and submit changes. This project follows a
+[Code of Conduct](CODE_OF_CONDUCT.md). Please report security issues per
+[SECURITY.md](SECURITY.md) rather than as a public issue.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
