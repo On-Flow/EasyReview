@@ -4,6 +4,7 @@ import { callLlmJsonWithRetry, type ChatMsg } from "./llmJson";
 import type { AiComment, AiReviewMeta } from "./types";
 
 const aiCommentResponseSchema = z.object({
+  summary: z.string(),
   comments: z.array(
     z.object({
       path: z.string(),
@@ -18,8 +19,10 @@ const SYSTEM_PROMPT = `You are a careful senior engineer doing a focused code re
 
 For each comment, anchor it to an exact line number from the RIGHT (new) side of the diff, using the post-change line numbers as they appear in the diff hunks (a "@@ -a,b +c,d @@" header counts new-side lines starting at c). If you can't confidently pin a comment to one specific line, omit it rather than guessing. Reference files by their exact path as given.
 
+Always also write a "summary": one or two sentences, written every time regardless of whether you found anything, so the reviewer can tell this was actually read rather than skipped. Say what you actually looked at and your overall read - e.g. "Checked the pool-sizing math and the tenant-isolation checks on the allocation endpoints; both look correct, no issues found." Be specific to what's in this diff, not generic ("looks fine", "no issues found" alone) - if there's nothing to flag, say briefly what you checked and confirmed rather than just that nothing was wrong.
+
 Respond with strict JSON only. No markdown fences, no prose outside the JSON. Match this shape exactly:
-{"comments":[{"path":"string","line":0,"body":"string","severity":"high|moderate|minor|nit"}]}`;
+{"summary":"string","comments":[{"path":"string","line":0,"body":"string","severity":"high|moderate|minor|nit"}]}`;
 
 function buildPrompt(
   files: { path: string; patch: string }[],
@@ -42,7 +45,7 @@ export async function reviewFiles(
   files: { path: string; patch: string }[],
   prTitle: string,
   prBody: string | null
-): Promise<{ comments: AiComment[]; meta: AiReviewMeta }> {
+): Promise<{ comments: AiComment[]; summary: string | null; meta: AiReviewMeta }> {
   const knownPaths = new Set(files.map((f) => f.path));
 
   try {
@@ -59,6 +62,7 @@ export async function reviewFiles(
     if (!result) {
       return {
         comments: [],
+        summary: null,
         meta: {
           model: config.ollamaModel,
           fallback: true,
@@ -82,10 +86,15 @@ export async function reviewFiles(
         severity: c.severity,
       }));
 
-    return { comments, meta: { model: config.ollamaModel, fallback: false } };
+    return {
+      comments,
+      summary: result.summary,
+      meta: { model: config.ollamaModel, fallback: false },
+    };
   } catch (err) {
     return {
       comments: [],
+      summary: null,
       meta: {
         model: config.ollamaModel,
         fallback: true,

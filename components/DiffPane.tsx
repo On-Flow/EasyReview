@@ -150,8 +150,11 @@ export default function DiffPane({
   };
 
   return (
-    <div className="overflow-x-auto rounded border border-gray-200 dark:border-gray-800">
-      <div className="bg-gray-50 dark:bg-gray-900 px-3 py-1.5 text-xs font-mono text-gray-600 dark:text-gray-400 border-b border-gray-200 dark:border-gray-800 flex items-center justify-between">
+    // The sticky file header must NOT sit inside the overflow-x-auto wrapper
+    // below - overflow other than visible on an ancestor captures the sticky
+    // positioning context and stops it from sticking to the page.
+    <div className="rounded border border-gray-200 dark:border-gray-800">
+      <div className="sticky top-[var(--group-header-h,0px)] z-10 rounded-t bg-gray-50 dark:bg-gray-900 px-3 py-1.5 text-xs font-mono text-gray-600 dark:text-gray-400 border-b border-gray-200 dark:border-gray-800 flex items-center justify-between">
         <span>
           {file.previousPath && file.previousPath !== file.path
             ? `${file.previousPath} → ${file.path}`
@@ -172,49 +175,51 @@ export default function DiffPane({
           </span>
         )}
       </div>
-      <Diff
-        viewType={viewType}
-        diffType={parsed.type}
-        hunks={parsed.hunks}
-        widgets={widgets}
-        tokens={tokens}
-        gutterType="default"
-      >
-        {(hunks) => hunks.flatMap(renderHunk)}
-      </Diff>
-      {unanchored.length > 0 && (
-        <div className="border-t border-gray-200 dark:border-gray-800 bg-amber-50 dark:bg-amber-950/30 p-3 space-y-2">
-          <p className="text-xs font-medium text-amber-800 dark:text-amber-300">
-            Comments not anchored to a visible line:
-          </p>
-          {unanchored.map((c) => (
-            <div key={c.id} className="text-sm">
-              <span className="font-mono text-xs text-gray-500">
-                {c.path}:{c.line ?? c.originalLine ?? "?"}
-              </span>{" "}
-              <span className="font-medium">{c.author}</span>: {c.body}
-            </div>
-          ))}
-        </div>
-      )}
-      {unanchoredAi.length > 0 && (
-        <div className="border-t border-gray-200 dark:border-gray-800 bg-indigo-50 dark:bg-indigo-950/30 p-3 space-y-2">
-          <p className="text-xs font-medium text-indigo-700 dark:text-indigo-400">
-            AI review comments not anchored to a visible line:
-          </p>
-          {unanchoredAi.map((c) => (
-            <div key={c.id} className="text-sm">
-              <span className="font-mono text-xs text-gray-500">
-                {c.path}:{c.line ?? "?"}
-              </span>{" "}
-              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-indigo-100 dark:bg-indigo-900 text-indigo-700 dark:text-indigo-300">
-                {c.severity}
-              </span>{" "}
-              {c.body}
-            </div>
-          ))}
-        </div>
-      )}
+      <div className="overflow-x-auto">
+        <Diff
+          viewType={viewType}
+          diffType={parsed.type}
+          hunks={parsed.hunks}
+          widgets={widgets}
+          tokens={tokens}
+          gutterType="default"
+        >
+          {(hunks) => hunks.flatMap(renderHunk)}
+        </Diff>
+        {unanchored.length > 0 && (
+          <div className="border-t border-gray-200 dark:border-gray-800 bg-amber-50 dark:bg-amber-950/30 p-3 space-y-2">
+            <p className="text-xs font-medium text-amber-800 dark:text-amber-300">
+              Comments not anchored to a visible line:
+            </p>
+            {unanchored.map((c) => (
+              <div key={c.id} className="text-sm">
+                <span className="font-mono text-xs text-gray-500">
+                  {c.path}:{c.line ?? c.originalLine ?? "?"}
+                </span>{" "}
+                <span className="font-medium">{c.author}</span>: {c.body}
+              </div>
+            ))}
+          </div>
+        )}
+        {unanchoredAi.length > 0 && (
+          <div className="border-t border-gray-200 dark:border-gray-800 bg-indigo-50 dark:bg-indigo-950/30 p-3 space-y-2">
+            <p className="text-xs font-medium text-indigo-700 dark:text-indigo-400">
+              AI review comments not anchored to a visible line:
+            </p>
+            {unanchoredAi.map((c) => (
+              <div key={c.id} className="text-sm">
+                <span className="font-mono text-xs text-gray-500">
+                  {c.path}:{c.line ?? "?"}
+                </span>{" "}
+                <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-indigo-100 dark:bg-indigo-900 text-indigo-700 dark:text-indigo-300">
+                  {c.severity}
+                </span>{" "}
+                {c.body}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

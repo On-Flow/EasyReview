@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { PrFile, ReviewComment, AiComment, Significance } from "@/lib/types";
 import { getFileHunkIds } from "@/lib/diffUtils";
 import DiffPane from "./DiffPane";
@@ -20,7 +20,7 @@ interface GroupSectionProps {
   onToggleHunksReviewed: (hunkIds: string[], reviewed: boolean) => void;
   onRunAiReview: () => void;
   aiReviewing: boolean;
-  aiReviewResult?: { count: number; error?: string };
+  aiReviewResult?: { count: number; summary?: string | null; error?: string };
 }
 
 const badgeStyles: Record<string, string> = {
@@ -46,6 +46,20 @@ export default function GroupSection({
 }: GroupSectionProps) {
   const [expanded, setExpanded] = useState(defaultExpanded);
 
+  // Measured so file headers can stick just below this group header, whatever
+  // height it wraps to (badges/buttons can wrap onto a second line).
+  const headerRef = useRef<HTMLDivElement>(null);
+  const [headerHeight, setHeaderHeight] = useState(0);
+  useEffect(() => {
+    const el = headerRef.current;
+    if (!el) return;
+    const update = () => setHeaderHeight(el.offsetHeight);
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
   const allHunkIds = useMemo(() => files.flatMap(getFileHunkIds), [files]);
   const reviewedCount = useMemo(
     () => allHunkIds.filter((id) => reviewedHunkIds.has(id)).length,
@@ -56,16 +70,24 @@ export default function GroupSection({
 
   return (
     <section
-      className={`rounded-lg border overflow-hidden ${
+      className={`rounded-lg border ${
         fullyReviewed
           ? "border-green-300 dark:border-green-800"
           : "border-gray-200 dark:border-gray-800"
       }`}
+      style={{ "--group-header-h": `${headerHeight}px` } as React.CSSProperties}
     >
+      {/* No overflow-hidden here (even though it'd tidy up the rounded
+          corners) - it would capture the sticky positioning context below
+          and stop the header from sticking. Rounding is handled per-edge
+          on the header/body instead. */}
       <div
-        className={`w-full flex flex-wrap items-center gap-3 px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-900 ${
+        ref={headerRef}
+        className={`sticky top-0 z-20 w-full flex flex-wrap items-center gap-3 px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-900 ${
+          expanded ? "rounded-t-lg" : "rounded-lg"
+        } ${
           fullyReviewed
-            ? "bg-green-50/60 dark:bg-green-950/20"
+            ? "bg-green-50 dark:bg-green-950"
             : "bg-white dark:bg-gray-950"
         }`}
       >
@@ -88,19 +110,19 @@ export default function GroupSection({
           <span className="flex items-center gap-2 shrink-0">
             {!aiReviewing && aiReviewResult && (
               <span
-                className={`text-xs ${
+                className={`inline-flex items-center text-xs font-semibold px-2 py-0.5 rounded-full ${
                   aiReviewResult.error
-                    ? "text-red-600 dark:text-red-400"
+                    ? "bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300"
                     : aiReviewResult.count > 0
-                      ? "text-indigo-600 dark:text-indigo-400"
-                      : "text-gray-400"
+                      ? "bg-indigo-100 text-indigo-800 dark:bg-indigo-950 dark:text-indigo-300"
+                      : "bg-indigo-50 text-indigo-600 dark:bg-indigo-950/50 dark:text-indigo-400"
                 }`}
               >
                 {aiReviewResult.error
-                  ? `AI review failed: ${aiReviewResult.error}`
+                  ? "AI review failed"
                   : aiReviewResult.count > 0
-                    ? `AI review: ${aiReviewResult.count} comment${aiReviewResult.count === 1 ? "" : "s"}`
-                    : "AI review: no issues found"}
+                    ? `AI: ${aiReviewResult.count} comment${aiReviewResult.count === 1 ? "" : "s"}`
+                    : "AI: checked, clear"}
               </span>
             )}
             <button
@@ -123,11 +145,31 @@ export default function GroupSection({
         )}
       </div>
       {expanded && (
-        <div className="p-4 space-y-4 bg-gray-50/50 dark:bg-black/20">
+        // rounded-b-lg only (no overflow-hidden - see note above; the p-4
+        // padding already keeps children clear of the corners).
+        <div className="rounded-b-lg p-4 space-y-4 bg-gray-50/50 dark:bg-black/20">
           {narrative && (
             <p className="text-sm text-gray-700 dark:text-gray-300 leading-relaxed">
               {narrative}
             </p>
+          )}
+          {aiReviewResult && !aiReviewResult.error && (
+            <div className="rounded-lg border-2 border-indigo-200 dark:border-indigo-900 bg-indigo-50 dark:bg-indigo-950/40 px-4 py-3">
+              <p className="text-xs font-bold uppercase tracking-wide text-indigo-700 dark:text-indigo-400 mb-1">
+                AI review{aiReviewResult.count > 0 ? ` — ${aiReviewResult.count} comment${aiReviewResult.count === 1 ? "" : "s"}` : " — no issues found"}
+              </p>
+              <p className="text-sm text-indigo-900 dark:text-indigo-200">
+                {aiReviewResult.summary ?? "Reviewed - no summary returned."}
+              </p>
+            </div>
+          )}
+          {aiReviewResult?.error && (
+            <div className="rounded-lg border-2 border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/40 px-4 py-3">
+              <p className="text-xs font-bold uppercase tracking-wide text-red-700 dark:text-red-400 mb-1">
+                AI review failed
+              </p>
+              <p className="text-sm text-red-900 dark:text-red-200">{aiReviewResult.error}</p>
+            </div>
           )}
           <div className="space-y-3">
             {files.map((file) => (

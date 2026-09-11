@@ -24,7 +24,7 @@ export default function Home() {
   );
   const [aiReviewingGroups, setAiReviewingGroups] = useState<Set<string>>(new Set());
   const [aiReviewResults, setAiReviewResults] = useState<
-    Map<string, { count: number; error?: string }>
+    Map<string, { count: number; summary?: string | null; error?: string }>
   >(new Map());
 
   useEffect(() => {
@@ -126,7 +126,9 @@ export default function Home() {
         setAiReviewResults((prev) => new Map(prev).set(groupId, { count: 0, error: message }));
         setError(`AI review: ${message}`);
       } else {
-        setAiReviewResults((prev) => new Map(prev).set(groupId, { count: comments.length }));
+        setAiReviewResults((prev) =>
+          new Map(prev).set(groupId, { count: comments.length, summary: data.summary })
+        );
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : "AI review failed";

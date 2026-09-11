@@ -28,6 +28,6 @@ export async function POST(
     );
   }
 
-  const { comments, meta } = await reviewFiles(files, prTitle, prBody);
-  return NextResponse.json({ comments, meta });
+  const { comments, summary, meta } = await reviewFiles(files, prTitle, prBody);
+  return NextResponse.json({ comments, summary, meta });
 }
